@@ -2,9 +2,11 @@ package com.dsh.mazegame;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
+import com.badlogic.gdx.audio.Sound;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.dsh.mazegame.settings.InputSettings;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -17,10 +19,11 @@ public class Player {
     private Texture sheetUp, sheetDown, sheetLeft, sheetRight;
     private Texture sheetUpLeft, sheetUpRight, sheetDownLeft, sheetDownRight;
     private final MazeGenerator maze;
+    private Sound damageSound;
     public static final int PLAYER_SIZE = 24;
-    private static final int COLLISION_SIZE = 24;
+    public static final int COLLISION_SIZE = 24;
 
-    // --- Observer pattern ---
+    // --- Ovserver Pattern(HealthBar) ---
     public interface HealthListener {
         void onHealthChanged(int newHealth, int maxHealth);
     }
@@ -64,10 +67,7 @@ public class Player {
         setHealth(health - amount);
         damaged = true;
         damageTimer = DAMAGE_FLASH_TIME;
-    }
-
-    public void heal(int amount) {
-        setHealth(health + amount);
+        damageSound.play(1.0f);
     }
 
     public Player(MazeGenerator maze, float startX, float startY) {
@@ -78,6 +78,7 @@ public class Player {
         loadTextures();
         initializeFrames();
         currentFrame = frameDown;
+        damageSound = Gdx.audio.newSound(Gdx.files.internal("core/assets/damage1.wav"));
     }
 
     private void loadTextures() {
@@ -108,8 +109,8 @@ public class Player {
 
         float[] checkPointsX = {
             centerX,                    // центр
-            centerX - (float) COLLISION_SIZE /2, // левый край
-            centerX + (float) COLLISION_SIZE /2, // правый край
+            centerX - (float) COLLISION_SIZE/2, // левый край
+            centerX + (float) COLLISION_SIZE/2, // правый край
             centerX,                    // центр
             centerX                     // центр
         };
@@ -118,20 +119,18 @@ public class Player {
             centerY,                    // центр
             centerY,                    // центр
             centerY,                    // центр
-            centerY - (float) COLLISION_SIZE /2, // нижний край
-            centerY + (float) COLLISION_SIZE /2  // верхний край
+            centerY - (float) COLLISION_SIZE/2, // нижний край
+            centerY + (float) COLLISION_SIZE/2  // верхний край
         };
 
         for (int i = 0; i < checkPointsX.length; i++) {
             int mazeX = (int) (checkPointsX[i] / MazeGenerator.TILE_SIZE);
             int mazeY = (int) (checkPointsY[i] / MazeGenerator.TILE_SIZE);
 
-            // Проверяем границы лабиринта
             if (mazeX < 0 || mazeX >= maze.width || mazeY < 0 || mazeY >= maze.height) {
                 return false;
             }
 
-            // Проверяем столкновение со стеной
             if (maze.maze[mazeX][mazeY] == MazeGenerator.WALL) {
                 return false;
             }
@@ -141,11 +140,12 @@ public class Player {
 
     public void handleInput(float delta) {
         float dx = 0, dy = 0;
+        InputSettings settings = InputSettings.getInstance();
 
-        boolean up = Gdx.input.isKeyPressed(Input.Keys.W) || Gdx.input.isKeyPressed(Input.Keys.UP);
-        boolean down = Gdx.input.isKeyPressed(Input.Keys.S) || Gdx.input.isKeyPressed(Input.Keys.DOWN);
-        boolean left = Gdx.input.isKeyPressed(Input.Keys.A) || Gdx.input.isKeyPressed(Input.Keys.LEFT);
-        boolean right = Gdx.input.isKeyPressed(Input.Keys.D) || Gdx.input.isKeyPressed(Input.Keys.RIGHT);
+        boolean up = Gdx.input.isKeyPressed(settings.getMoveUp());
+        boolean down = Gdx.input.isKeyPressed(settings.getMoveDown());
+        boolean left = Gdx.input.isKeyPressed(settings.getMoveLeft());
+        boolean right = Gdx.input.isKeyPressed(settings.getMoveRight());
 
         if (up) dy += 1;
         if (down) dy -= 1;
@@ -153,7 +153,7 @@ public class Player {
         if (right) dx += 1;
         if (Gdx.input.isKeyPressed(Input.Keys.ESCAPE)) Gdx.app.exit();
 
-        if (Gdx.input.isKeyPressed(Input.Keys.SHIFT_LEFT)) {
+        if (Gdx.input.isKeyPressed(settings.getSprint())) {
             speed = 200f;
         } else {
             speed = 100f;
@@ -167,11 +167,9 @@ public class Player {
             float newX = x + dx * speed * delta;
             float newY = y + dy * speed * delta;
 
-            // Проверяем движение по X
             if (canMove(newX, y)) {
                 x = newX;
             }
-            // Проверяем движение по Y
             if (canMove(x, newY)) {
                 y = newY;
             }
@@ -238,5 +236,8 @@ public class Player {
         sheetUpRight.dispose();
         sheetDownLeft.dispose();
         sheetDownRight.dispose();
+        if (damageSound != null) {
+            damageSound.dispose();
+        }
     }
 }
