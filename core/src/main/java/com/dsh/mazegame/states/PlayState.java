@@ -5,41 +5,62 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.Animation;
+import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.utils.viewport.FitViewport;
 import com.badlogic.gdx.utils.viewport.Viewport;
+import com.badlogic.gdx.audio.Music;
 import com.dsh.mazegame.MazeGenerator;
 import com.dsh.mazegame.Player;
+import com.dsh.mazegame.difficulty.DifficultyStrategy;
+import com.dsh.mazegame.settings.InputSettings;
+import com.dsh.mazegame.utils.Leaderboard;
+import com.dsh.mazegame.utils.Stopwatch;
+import com.dsh.mazegame.HealthBar;
+import com.dsh.mazegame.trap.Trap;
+import com.dsh.mazegame.trap.PitTrap;
+import com.dsh.mazegame.trap.SpikeTrap;
 
 public class PlayState implements GameState {
-    private final SpriteBatch batch;
     private final OrthographicCamera camera;
     private final Viewport viewport;
+    private final OrthographicCamera uiCamera;
     private final Texture floorTexture, wallTexture, startTexture, endTexture;
     private final Animation<TextureRegion> maskAnimation;
     private float animationTime;
     private final MazeGenerator maze;
     private final Player player;
     private final GameStateManager stateManager;
+    private final String playerName;
+    private final HealthBar healthBar;
 
-    public PlayState(GameStateManager stateManager) {
+    private final Music music;
+    private boolean showFullMaze = false;
+    private int lastTrapCellX = -1, lastTrapCellY = -1;
+    private final BitmapFont font = new BitmapFont();
+    private final com.badlogic.gdx.math.Vector3 tmpVec3 = new com.badlogic.gdx.math.Vector3();
+    private PitTrap qtePit = null;
+
+    public PlayState(GameStateManager stateManager, String playerName, int mazeWidth, int mazeHeight, DifficultyStrategy difficultyStrategy) {
         this.stateManager = stateManager;
-        batch = new SpriteBatch();
+        this.playerName = playerName;
+        Stopwatch.getInstance().reset();
+        Stopwatch.getInstance().start();
 
-        // Загружаем текстуры
+        // --- Загрузка текстур ---
         floorTexture = new Texture("./core/assets/floor.png");
         wallTexture = new Texture("./core/assets/wall.png");
         startTexture = new Texture("./core/assets/start.png");
         endTexture = new Texture("./core/assets/end.png");
 
-        // Загрузка текстур для анимации маски
+        // --- Загрузка текстур для маски ---
         Texture maskTexture1 = new Texture("./core/assets/mask1.png");
         Texture maskTexture2 = new Texture("./core/assets/mask2.png");
         Texture maskTexture3 = new Texture("./core/assets/mask3.png");
         Texture maskTexture4 = new Texture("./core/assets/mask4.png");
 
-        // Создание анимации
+        // --- Создание анимации ---
         maskAnimation = new Animation<>(0.5f,
             new TextureRegion(maskTexture1),
             new TextureRegion(maskTexture2),
@@ -50,29 +71,123 @@ public class PlayState implements GameState {
 
         animationTime = 0f;
 
-        // Создаем лабиринт
-        maze = new MazeGenerator(21,21);
+        maze = new MazeGenerator(mazeWidth, mazeHeight, difficultyStrategy);
 
-        // Создаем камеру и viewport с фиксированным размером, чтобы следовать за игроком
+        // --- Создание камеры ---
         camera = new OrthographicCamera();
         viewport = new FitViewport(3 * MazeGenerator.TILE_SIZE, 3 * MazeGenerator.TILE_SIZE, camera); // Размер области видимости камеры
         viewport.update(Gdx.graphics.getWidth(), Gdx.graphics.getHeight(), true);
 
-        // Создаем игрока
+        // --- UI-камера для интерфейса ---
+        uiCamera = new OrthographicCamera();
+        uiCamera.setToOrtho(false, viewport.getScreenWidth(), viewport.getScreenHeight());
+        uiCamera.update();
+
+        // --- Создание игрока ---
         player = new Player(maze, maze.startX * MazeGenerator.TILE_SIZE, maze.startY * MazeGenerator.TILE_SIZE);
 
-        // Устанавливаем начальную позицию камеры
+        // --- HealthBar ---
+        healthBar = new HealthBar(player.getMaxHealth());
+        player.addHealthListener(healthBar);
+
+        // --- Музыка ---
+        music = Gdx.audio.newMusic(Gdx.files.internal("./core/assets/sound.wav"));
+        music.setLooping(true);
+        music.setVolume(0.5f);
+        music.play();
+
         updateCameraPosition();
     }
 
     @Override
     public void update(float delta) {
-        player.handleInput(delta);
-        updateCameraPosition();
+        float playerCenterX = player.getX() + Player.PLAYER_SIZE / 2f;
+        float playerCenterY = player.getY() + Player.PLAYER_SIZE / 2f;
+        int playerCellX = (int) (playerCenterX / MazeGenerator.TILE_SIZE);
+        int playerCellY = (int) (playerCenterY / MazeGenerator.TILE_SIZE);
 
-        // Проверка достижения финиша
+        PitTrap currentPit = null;
+        Trap currentOtherTrap = null;
+
+        // --- Один проход по ловушкам ---
+        for (Trap trap : maze.traps) {
+            if (trap instanceof SpikeTrap) {
+                ((SpikeTrap) trap).update(delta, player);
+            }
+            if (trap instanceof PitTrap) {
+                PitTrap pit = (PitTrap) trap;
+                if (pit.getX() == playerCellX && pit.getY() == playerCellY) {
+                    currentPit = pit;
+                } else {
+                    pit.resetIfPlayerLeft(playerCellX, playerCellY);
+                }
+            } else {
+                if (trap.getX() == playerCellX && trap.getY() == playerCellY) {
+                    currentOtherTrap = trap;
+                }
+            }
+        }
+
+        boolean pitBlocking = false;
+        qtePit = null;
+        if (currentPit != null) {
+            currentPit.onStep(player);
+            if (currentPit.isBlocking()) {
+                pitBlocking = true;
+                if (currentPit.isQteActive()) {
+                    qtePit = currentPit;
+                }
+            }
+        }
+
+        if (!pitBlocking) {
+            player.handleInput(delta);
+            player.update(delta);
+            updateCameraPosition();
+        } else {
+            updateCameraPosition();
+        }
+
+        if (currentOtherTrap != null) {
+            if (lastTrapCellX != playerCellX || lastTrapCellY != playerCellY) {
+                currentOtherTrap.onStep(player);
+                lastTrapCellX = playerCellX;
+                lastTrapCellY = playerCellY;
+            }
+        } else {
+            lastTrapCellX = -1;
+            lastTrapCellY = -1;
+        }
+
+        // --- Проверка смерти игрока ---
+        if (player.getHealth() <= 0) {
+            stateManager.setState(new MenuState(stateManager, false, true));
+            return;
+        }
+
         if (isPlayerAtFinish()) {
-            stateManager.setState(new MenuState(stateManager, true));
+            Stopwatch.getInstance().stop();
+            float time = Stopwatch.getInstance().getElapsedTime();
+            Leaderboard.getInstance().addScore(playerName, time);
+            stateManager.setState(new MenuState(stateManager, true, false));
+        }
+
+        InputSettings settings = InputSettings.getInstance();
+        if (Gdx.input.isKeyJustPressed(settings.getShowMap())) {
+            showFullMaze = !showFullMaze;
+            if (showFullMaze) {
+                camera.position.set(
+                    (maze.width * MazeGenerator.TILE_SIZE) / 2f,
+                    (maze.height * MazeGenerator.TILE_SIZE) / 2f,
+                    0
+                );
+                camera.viewportWidth = maze.width * MazeGenerator.TILE_SIZE;
+                camera.viewportHeight = maze.height * MazeGenerator.TILE_SIZE;
+                camera.update();
+            } else {
+                viewport.update(Gdx.graphics.getWidth(), Gdx.graphics.getHeight(), true);
+                updateCameraPosition();
+            }
         }
     }
 
@@ -83,14 +198,12 @@ public class PlayState implements GameState {
 
         animationTime += Gdx.graphics.getDeltaTime();
 
-        // Получение текущего кадра анимации
         TextureRegion currentMaskFrame = maskAnimation.getKeyFrame(animationTime);
-
 
         batch.setProjectionMatrix(camera.combined);
         batch.begin();
 
-        // Отрисовка лабиринта
+        // --- Отрисовка лабиринта ---
         for (int x = 0; x < maze.width; x++) {
             for (int y = 0; y < maze.height; y++) {
                 float drawX = x * MazeGenerator.TILE_SIZE;
@@ -108,23 +221,37 @@ public class PlayState implements GameState {
             }
         }
 
-        // Отрисовка игрока
-        batch.draw(player.getCurrentFrame(), player.getX(), player.getY(), Player.PLAYER_SIZE, Player.PLAYER_SIZE);
+        for (Trap trap : maze.traps) {
+            trap.render(batch);
+        }
+
+        player.render(batch);
+
+        if (!showFullMaze) {
+            float maskWidth = viewport.getWorldWidth();
+            float maskHeight = viewport.getWorldHeight();
+            float maskX = camera.position.x - maskWidth / 2;
+            float maskY = camera.position.y - maskHeight / 2;
+            batch.draw(currentMaskFrame, maskX, maskY, maskWidth, maskHeight);
+        }
+
         batch.end();
 
-
-
-        // Отрисовка маски, привязанной к камере
-        batch.setProjectionMatrix(camera.combined);
+        batch.setProjectionMatrix(uiCamera.combined);
         batch.begin();
+        healthBar.render(batch);
 
-        // Маска адаптируется к текущему viewport
-        float maskWidth = viewport.getWorldWidth();
-        float maskHeight = viewport.getWorldHeight();
-        float maskX = camera.position.x - maskWidth / 2;
-        float maskY = camera.position.y - maskHeight / 2;
+        if (qtePit != null) {
+            font.getData().setScale(2.5f);
+            String keyName = com.badlogic.gdx.Input.Keys.toString(qtePit.getQteKey());
 
-        batch.draw(currentMaskFrame, maskX, maskY, maskWidth, maskHeight);
+            float qteUiX = uiCamera.viewportWidth / 2f - 60;
+            float qteUiY = uiCamera.viewportHeight - 80;
+
+            font.draw(batch, "Press: " + keyName, qteUiX, qteUiY);
+            font.getData().setScale(1f);
+        }
+
         batch.end();
     }
 
@@ -144,17 +271,17 @@ public class PlayState implements GameState {
         float cameraHalfWidth = camera.viewportWidth / 2;
         float cameraHalfHeight = camera.viewportHeight / 2;
 
-        // Ограничиваем позицию камеры, чтобы она не выходила за пределы лабиринта
         float cameraX = Math.max(cameraHalfWidth, Math.min(playerCenterX, mazePixelWidth - cameraHalfWidth));
         float cameraY = Math.max(cameraHalfHeight, Math.min(playerCenterY, mazePixelHeight - cameraHalfHeight));
 
-        camera.position.set(cameraX, cameraY, 0);
-        camera.update();
+        if (camera.position.x != cameraX || camera.position.y != cameraY) {
+            camera.position.set(cameraX, cameraY, 0);
+            camera.update();
+        }
     }
 
     @Override
     public void dispose() {
-        batch.dispose();
         floorTexture.dispose();
         wallTexture.dispose();
         startTexture.dispose();
@@ -163,5 +290,11 @@ public class PlayState implements GameState {
         for (TextureRegion region : maskAnimation.getKeyFrames()) {
             region.getTexture().dispose();
         }
+        healthBar.dispose();
+        if (music != null) {
+            music.stop();
+            music.dispose();
+        }
+        font.dispose();
     }
 }
