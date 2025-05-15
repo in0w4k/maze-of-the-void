@@ -7,9 +7,12 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g2d.Animation;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
+import com.dsh.mazegame.difficulty.DifficultyStrategyFactory;
 import com.dsh.mazegame.utils.Leaderboard;
 
 public class MenuState implements GameState {
@@ -20,8 +23,11 @@ public class MenuState implements GameState {
     private final OrthographicCamera camera;
     private String playerName = "";
     private final BitmapFont leaderboardFont = new BitmapFont();
-    private Music music;
-    private Texture backgroundTexture;
+    private final Music music;
+    private Animation<TextureRegion> backgroundAnimation;
+    private float animationTime = 0f;
+    private final DifficultyStrategyFactory difficultyFactory = DifficultyStrategyFactory.getInstance();
+
 
     private int selected = 0;
     private final String[] menuItems = {
@@ -33,6 +39,17 @@ public class MenuState implements GameState {
     };
     private boolean inLeaderboard = false;
     private boolean inSettings = false;
+    private boolean inKeyBindings = false;
+    private int selectedKeyBinding = 0;
+    private final String[] keyBindings = {
+        "Move Up",
+        "Move Down",
+        "Move Left",
+        "Move Right",
+        "Sprint",
+        "Show Map"
+    };
+    private boolean waitingForKey = false;
 
     private int mazeWidth = 21;
     private int mazeHeight = 21;
@@ -64,7 +81,7 @@ public class MenuState implements GameState {
         camera.setToOrtho(false, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         camera.update();
 
-        backgroundTexture = new Texture("./core/assets/menu.png");
+        loadBackgroundAnimation();
 
         music = Gdx.audio.newMusic(Gdx.files.internal("./core/assets/menu.wav"));
         music.setLooping(true);
@@ -72,9 +89,26 @@ public class MenuState implements GameState {
         music.play();
     }
 
+    private void loadBackgroundAnimation() {
+        Texture[] backgroundFrames = new Texture[8];
+        for (int i = 0; i < 8; i++) {
+            backgroundFrames[i] = new Texture("./core/assets/menu-export" + (i + 1) + ".png");
+        }
+
+        TextureRegion[] backgroundRegions = new TextureRegion[8];
+        for (int i = 0; i < 8; i++) {
+            backgroundRegions[i] = new TextureRegion(backgroundFrames[i]);
+        }
+
+        backgroundAnimation = new Animation<>(0.5f, backgroundRegions);
+        backgroundAnimation.setPlayMode(Animation.PlayMode.LOOP);
+    }
+
     @Override
     public void update(float delta) {
         camera.update();
+
+        animationTime += delta;
 
         if (inLeaderboard) {
             if (Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE) || Gdx.input.isKeyJustPressed(Input.Keys.BACKSPACE)) {
@@ -84,17 +118,27 @@ public class MenuState implements GameState {
         }
 
         if (inSettings) {
-            // --- Паттерн "Команда" для смены размера лабиринта ---
             if (Gdx.input.isKeyJustPressed(Input.Keys.LEFT)) {
                 mazeSizeIndex = (mazeSizeIndex + mazeSizes.length - 1) % mazeSizes.length;
             }
             if (Gdx.input.isKeyJustPressed(Input.Keys.RIGHT)) {
                 mazeSizeIndex = (mazeSizeIndex + 1) % mazeSizes.length;
             }
+
+            if (Gdx.input.isKeyJustPressed(Input.Keys.A)) {
+                difficultyFactory.previousStrategy();
+            }
+            if (Gdx.input.isKeyJustPressed(Input.Keys.D)) {
+                difficultyFactory.nextStrategy();
+            }
+
             mazeWidth = mazeSizes[mazeSizeIndex][0];
             mazeHeight = mazeSizes[mazeSizeIndex][1];
             if (Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE) || Gdx.input.isKeyJustPressed(Input.Keys.BACKSPACE)) {
                 inSettings = false;
+            }
+            if (Gdx.input.isKeyJustPressed(Input.Keys.ENTER)) {
+                inKeyBindings = true;
             }
             return;
         }
@@ -110,7 +154,13 @@ public class MenuState implements GameState {
             switch (selected) {
                 case 0: // Start Game
                     if (!playerName.isEmpty()) {
-                        stateManager.setState(new PlayState(stateManager, playerName, mazeWidth, mazeHeight));
+                        stateManager.setState(new PlayState(
+                            stateManager,
+                            playerName,
+                            mazeWidth,
+                            mazeHeight,
+                            difficultyFactory.getCurrentStrategy()
+                        ));
                     }
                     break;
                 case 2: // Leaderboard
@@ -125,7 +175,7 @@ public class MenuState implements GameState {
             }
         }
 
-        // Ввод имени только если выбран пункт "Name"
+        // Name
         if (selected == 1) {
             if (Gdx.input.isKeyJustPressed(Input.Keys.BACKSPACE) && playerName.length() > 0) {
                 playerName = playerName.substring(0, playerName.length() - 1);
@@ -146,29 +196,54 @@ public class MenuState implements GameState {
 
     @Override
     public void render(SpriteBatch batch) {
+        camera.setToOrtho(false, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        camera.zoom = 1.0f;
         camera.update();
         batch.setProjectionMatrix(camera.combined);
 
         Gdx.gl.glClearColor(0.1f, 0.1f, 0.1f, 1);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+        Gdx.gl.glViewport(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
 
         batch.begin();
 
-        batch.draw(backgroundTexture, 0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        TextureRegion currentFrame = backgroundAnimation.getKeyFrame(animationTime);
+
+        batch.draw(currentFrame, 0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+
+        float screenWidth = Gdx.graphics.getWidth();
+        float screenHeight = Gdx.graphics.getHeight();
+        float menuWidth = 600f;
+        float menuX = (screenWidth - menuWidth) / 2;
+        float titleY = screenHeight * 0.85f;
+        float startY = screenHeight * 0.7f;
+        float stepY = screenHeight * 0.05f;
 
         if (inLeaderboard) {
-            font.draw(batch, "Leaderboard (ESC to return):", Gdx.graphics.getWidth() / 2f - 300, Gdx.graphics.getHeight() * 0.8f);
+            font.draw(batch, "Leaderboard (ESC to return):", menuX, titleY);
             String[] leaderboard = Leaderboard.getInstance().getTopScores();
             for (int i = 0; i < leaderboard.length; i++) {
-                leaderboardFont.draw(batch, leaderboard[i], Gdx.graphics.getWidth() / 2f - 300, Gdx.graphics.getHeight() * 0.7f - i * 30);
+                leaderboardFont.draw(batch, leaderboard[i], menuX, startY - i * stepY);
             }
             batch.end();
             return;
         }
 
+        if (inKeyBindings) {
+            font.draw(batch, "Key Bindings (ESC to return)", menuX, titleY);
+            font.setColor(Color.WHITE);
+            font.draw(batch, "CTRL+Z to undo last change", menuX, titleY - stepY);
+
+
+            batch.end();
+            return;
+        }
+
         if (inSettings) {
-            font.draw(batch, "Settings (ESC to return)", Gdx.graphics.getWidth() / 2f - 300, Gdx.graphics.getHeight() * 0.8f);
-            font.draw(batch, "Maze Size: " + mazeSizeNames[mazeSizeIndex] + " (LEFT/RIGHT)", Gdx.graphics.getWidth() / 2f - 300, Gdx.graphics.getHeight() * 0.7f);
+            font.draw(batch, "Settings (ESC to return)", menuX, titleY);
+            font.draw(batch, "Maze Size: " + mazeSizeNames[mazeSizeIndex] + " (LEFT/RIGHT)", menuX, startY);
+            font.draw(batch, "Difficulty: " + difficultyFactory.getCurrentDifficultyName() + " (A/D)", menuX, startY - stepY);
+            font.draw(batch, "Key Bindings (ENTER)", menuX, startY - stepY * 2);
             batch.end();
             return;
         }
@@ -181,10 +256,7 @@ public class MenuState implements GameState {
         } else {
             title = "Maze Game";
         }
-        font.draw(batch, title, Gdx.graphics.getWidth() / 2f - 300, Gdx.graphics.getHeight() * 0.85f);
-
-        float startY = Gdx.graphics.getHeight() * 0.7f;
-        float stepY = 60f;
+        font.draw(batch, title, menuX, titleY);
 
         for (int i = 0; i < menuItems.length; i++) {
             float y = startY - i * stepY;
@@ -196,9 +268,9 @@ public class MenuState implements GameState {
 
             if (i == 1) {
                 String nameField = "Name: " + (selected == 1 ? playerName + "_" : playerName);
-                font.draw(batch, nameField, Gdx.graphics.getWidth() / 2f - 300, y);
+                font.draw(batch, nameField, menuX, y);
             } else {
-                font.draw(batch, menuItems[i], Gdx.graphics.getWidth() / 2f - 300, y);
+                font.draw(batch, menuItems[i], menuX, y);
             }
         }
         font.setColor(Color.WHITE);
@@ -215,8 +287,12 @@ public class MenuState implements GameState {
             music.stop();
             music.dispose();
         }
-        if (backgroundTexture != null) {
-            backgroundTexture.dispose();
+        if (backgroundAnimation != null) {
+            for (TextureRegion region : backgroundAnimation.getKeyFrames()) {
+                if (region != null && region.getTexture() != null) {
+                    region.getTexture().dispose();
+                }
+            }
         }
     }
 }
