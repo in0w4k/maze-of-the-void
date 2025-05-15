@@ -22,7 +22,6 @@ public class Player {
     private Sound damageSound;
     public static final int PLAYER_SIZE = 24;
     public static final int COLLISION_SIZE = 24;
-
     // --- Ovserver Pattern(HealthBar) ---
     public interface HealthListener {
         void onHealthChanged(int newHealth, int maxHealth);
@@ -35,34 +34,23 @@ public class Player {
     public void addHealthListener(HealthListener listener) {
         healthListeners.add(listener);
     }
-
     public void removeHealthListener(HealthListener listener) {
         healthListeners.remove(listener);
     }
-
     private void notifyHealthChanged() {
         for (HealthListener listener : healthListeners) {
             listener.onHealthChanged(health, maxHealth);
         }
     }
-
-    public int getHealth() {
-        return health;
-    }
-
-    public int getMaxHealth() {
-        return maxHealth;
-    }
-
+    public int getHealth() { return health; }
+    public int getMaxHealth() { return maxHealth; }
     public void setHealth(int value) {
         health = Math.max(0, Math.min(value, maxHealth));
         notifyHealthChanged();
     }
-
     private boolean damaged = false;
     private float damageTimer = 0f;
     private static final float DAMAGE_FLASH_TIME = 0.2f;
-
     public void damage(int amount) {
         setHealth(health - amount);
         damaged = true;
@@ -78,7 +66,7 @@ public class Player {
         loadTextures();
         initializeFrames();
         currentFrame = frameDown;
-        damageSound = Gdx.audio.newSound(Gdx.files.internal("core/assets/damage1.wav"));
+        damageSound = Gdx.audio.newSound(Gdx.files.internal("core/assets/damage.wav"));
     }
 
     private void loadTextures() {
