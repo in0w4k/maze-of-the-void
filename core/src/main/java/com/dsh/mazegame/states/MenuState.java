@@ -14,6 +14,10 @@ import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.dsh.mazegame.difficulty.DifficultyStrategyFactory;
 import com.dsh.mazegame.utils.Leaderboard;
+import com.dsh.mazegame.settings.InputSettings;
+import com.dsh.mazegame.settings.commands.InputCommandManager;
+import com.dsh.mazegame.settings.commands.InputCommand;
+import com.dsh.mazegame.settings.commands.ChangeKeyCommand;
 
 public class MenuState implements GameState {
     private final BitmapFont font;
@@ -113,6 +117,50 @@ public class MenuState implements GameState {
         if (inLeaderboard) {
             if (Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE) || Gdx.input.isKeyJustPressed(Input.Keys.BACKSPACE)) {
                 inLeaderboard = false;
+            }
+            return;
+        }
+
+        if (inKeyBindings) {
+            if (waitingForKey) {
+                for (int i = 0; i < 256; i++) {
+                    if (Gdx.input.isKeyJustPressed(i)) {
+                        InputSettings settings = InputSettings.getInstance();
+                        InputCommandManager commandManager = InputCommandManager.getInstance();
+
+                        String keyName = "";
+                        switch (selectedKeyBinding) {
+                            case 0: keyName = "moveUp"; break;
+                            case 1: keyName = "moveDown"; break;
+                            case 2: keyName = "moveLeft"; break;
+                            case 3: keyName = "moveRight"; break;
+                            case 4: keyName = "sprint"; break;
+                            case 5: keyName = "showMap"; break;
+                        }
+
+                        InputCommand command = new ChangeKeyCommand(settings, keyName, i);
+                        commandManager.executeCommand(command);
+
+                        waitingForKey = false;
+                        break;
+                    }
+                }
+            } else {
+                if (Gdx.input.isKeyJustPressed(Input.Keys.UP)) {
+                    selectedKeyBinding = (selectedKeyBinding - 1 + keyBindings.length) % keyBindings.length;
+                }
+                if (Gdx.input.isKeyJustPressed(Input.Keys.DOWN)) {
+                    selectedKeyBinding = (selectedKeyBinding + 1) % keyBindings.length;
+                }
+                if (Gdx.input.isKeyJustPressed(Input.Keys.ENTER)) {
+                    waitingForKey = true;
+                }
+                if (Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
+                    inKeyBindings = false;
+                }
+                if (Gdx.input.isKeyJustPressed(Input.Keys.Z) && Gdx.input.isKeyPressed(Input.Keys.CONTROL_LEFT)) {
+                    InputCommandManager.getInstance().undo();
+                }
             }
             return;
         }
@@ -234,7 +282,33 @@ public class MenuState implements GameState {
             font.setColor(Color.WHITE);
             font.draw(batch, "CTRL+Z to undo last change", menuX, titleY - stepY);
 
+            InputSettings settings = InputSettings.getInstance();
+            for (int i = 0; i < keyBindings.length; i++) {
+                String keyName = keyBindings[i];
+                int keyCode = 0;
+                switch (keyName.toLowerCase().replace(" ", "")) {
+                    case "moveup": keyCode = settings.getMoveUp(); break;
+                    case "movedown": keyCode = settings.getMoveDown(); break;
+                    case "moveleft": keyCode = settings.getMoveLeft(); break;
+                    case "moveright": keyCode = settings.getMoveRight(); break;
+                    case "sprint": keyCode = settings.getSprint(); break;
+                    case "showmap": keyCode = settings.getShowMap(); break;
+                }
 
+                String keyText = Input.Keys.toString(keyCode);
+                if (i == selectedKeyBinding) {
+                    font.setColor(Color.YELLOW);
+                } else {
+                    font.setColor(Color.WHITE);
+                }
+
+                if (waitingForKey && i == selectedKeyBinding) {
+                    font.draw(batch, keyName + ": Press any key...", menuX, startY - i * stepY);
+                } else {
+                    font.draw(batch, keyName + ": " + keyText, menuX, startY - i * stepY);
+                }
+                font.setColor(Color.WHITE);
+            }
             batch.end();
             return;
         }
